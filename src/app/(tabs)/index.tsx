@@ -1,3 +1,9 @@
+import * as DocumentPicker from 'expo-document-picker';
+import {
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+} from 'expo-audio';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -9,14 +15,89 @@ const HOLD_DELAY_MS = 350;
 const HOLD_INTERVAL_MS = 250;
 
 export default function HomeScreen() {
-  const { afterSession } = useAfterSession();
+  const { afterSession, musicPlayback, seasonalBackground } = useAfterSession();
   const [currentTime, setCurrentTime] = useState('');
   const [totalMinutes, setTotalMinutes] = useState(60);
   const [presetVisible, setPresetVisible] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(60 * 60);
   const [overtimeSeconds, setOvertimeSeconds] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
+  const [musicUri, setMusicUri] = useState<string | null>(null);
+  const [musicName, setMusicName] = useState<string | null>(null);
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const remainingSecondsRef = useRef(remainingSeconds);
+  const overtimeSecondsRef = useRef(overtimeSeconds);
+  remainingSecondsRef.current = remainingSeconds;
+  overtimeSecondsRef.current = overtimeSeconds;
+  const player = useAudioPlayer(musicUri ? { uri: musicUri } : null);
+  const playbackStatus = useAudioPlayerStatus(player);
+
+  const pickMusic = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: 'audio/*',
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+
+    if (result.canceled || !result.assets?.[0]) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    setMusicUri(asset.uri);
+    setMusicName(asset.name);
+  };
+
+  const stopMusic = () => {
+    player.pause();
+    void player.seekTo(0);
+  };
+
+  const playMusicFromCurrentPosition = () => {
+    if (!musicUri) return;
+
+    if (playbackStatus.didJustFinish) {
+      void player.seekTo(0).then(() => {
+        player.play();
+      });
+      return;
+    }
+
+    player.play();
+  };
+
+  const toggleMusicPlayback = () => {
+    if (!musicUri) return;
+
+    if (playbackStatus.playing) {
+      player.pause();
+      return;
+    }
+
+    playMusicFromCurrentPosition();
+  };
+
+  const toggleTimerRunning = () => {
+    const nextRunning = !isRunning;
+    setIsRunning(nextRunning);
+
+    if (musicPlayback === 'sync' && musicUri) {
+      if (nextRunning) {
+        playMusicFromCurrentPosition();
+      } else {
+        player.pause();
+      }
+    }
+  };
+
+  useEffect(() => {
+    void setAudioModeAsync({
+      playsInSilentMode: true,
+      allowsRecording: false,
+      shouldRouteThroughEarpiece: false,
+      interruptionMode: 'doNotMix',
+    });
+  }, []);
 
   const adjustTime = (deltaMinutes: number) => {
     setTotalMinutes((prevTotal) => {
@@ -24,7 +105,26 @@ export default function HomeScreen() {
       const actualDelta = newTotal - prevTotal;
 
       if (actualDelta !== 0) {
-        setRemainingSeconds((prev) => Math.max(0, prev + actualDelta * 60));
+        const currentBalance =
+          remainingSecondsRef.current - overtimeSecondsRef.current;
+        const newBalance = currentBalance + actualDelta * 60;
+
+        if (newBalance > 0) {
+          remainingSecondsRef.current = newBalance;
+          overtimeSecondsRef.current = 0;
+          setRemainingSeconds(newBalance);
+          setOvertimeSeconds(0);
+        } else if (newBalance === 0) {
+          remainingSecondsRef.current = 0;
+          overtimeSecondsRef.current = 0;
+          setRemainingSeconds(0);
+          setOvertimeSeconds(0);
+        } else {
+          remainingSecondsRef.current = 0;
+          overtimeSecondsRef.current = Math.abs(newBalance);
+          setRemainingSeconds(0);
+          setOvertimeSeconds(Math.abs(newBalance));
+        }
       }
 
       return newTotal;
@@ -87,7 +187,9 @@ export default function HomeScreen() {
 
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: seasonalBackground }]}
+    >
       <View style={styles.container}>
         <Text style={styles.title}>SMART SESSION TIMER</Text>
         <Pressable
@@ -168,7 +270,7 @@ export default function HomeScreen() {
 
         <Pressable
           style={styles.startButton}
-          onPress={() => setIsRunning((prev) => !prev)}
+          onPress={toggleTimerRunning}
         >
           <Text style={styles.startText}>
             {isRunning ? '⏸ PAUSE' : '▶ START'}
@@ -179,6 +281,7 @@ export default function HomeScreen() {
           onPress={() => {
             setIsRunning(false);
             setOvertimeSeconds(0);
+            stopMusic();
 
             if (afterSession === 'reset') {
               setTotalMinutes(60);
@@ -192,7 +295,20 @@ export default function HomeScreen() {
         </Pressable>
 
         <View style={styles.audioArea}>
-          <Text style={styles.audioText}>♫ No Music Selected</Text>
+          <View style={styles.musicRow}>
+            <Pressable onPress={pickMusic} style={styles.musicSelect}>
+              <Text style={styles.audioText}>
+                ♫ {musicName ?? 'No Music Selected'}
+              </Text>
+            </Pressable>
+            {musicUri ? (
+              <Pressable onPress={toggleMusicPlayback} hitSlop={8}>
+                <Text style={styles.audioText}>
+                  {playbackStatus.playing ? '⏸' : '▶'}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
           <Text style={styles.audioText}>🔊 Device Speaker</Text>
         </View>
       </View>
@@ -203,7 +319,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F7F7F5',
   },
 
   container: {
@@ -324,6 +439,16 @@ const styles = StyleSheet.create({
     width: '100%',
     marginTop: 28,
     gap: 12,
+  },
+
+  musicRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+
+  musicSelect: {
+    flex: 1,
   },
 
   audioText: {

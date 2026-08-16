@@ -1,12 +1,22 @@
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAfterSession } from '@/hooks/use-after-session';
+import {
+  SEASONAL_THEMES,
+  useAfterSession,
+} from '@/hooks/use-after-session';
 
 export default function Settings() {
   const router = useRouter();
-  const { afterSession, setAfterSession } = useAfterSession();
+  const {
+    afterSession,
+    setAfterSession,
+    musicPlayback,
+    setMusicPlayback,
+    seasonalTheme,
+    setSeasonalTheme,
+  } = useAfterSession();
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -23,39 +33,103 @@ export default function Settings() {
           <View style={styles.headerSpacer} />
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>AFTER SESSION</Text>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>AFTER SESSION</Text>
 
-          <Pressable
-            style={styles.option}
-            onPress={() => setAfterSession('reset')}
-          >
-            <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Reset to 60 minutes</Text>
-              <Text style={styles.optionSubtitle}>
-                Start each new session at 60 minutes
-              </Text>
-            </View>
-            {afterSession === 'reset' && (
-              <Text style={styles.checkmark}>✓</Text>
-            )}
-          </Pressable>
+            <Pressable
+              style={styles.option}
+              onPress={() => setAfterSession('reset')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Reset to 60 minutes</Text>
+                <Text style={styles.optionSubtitle}>
+                  Start each new session at 60 minutes
+                </Text>
+              </View>
+              {afterSession === 'reset' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
 
-          <Pressable
-            style={styles.option}
-            onPress={() => setAfterSession('keep')}
-          >
-            <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Keep last time</Text>
-              <Text style={styles.optionSubtitle}>
-                Use the duration from the previous session
-              </Text>
-            </View>
-            {afterSession === 'keep' && (
-              <Text style={styles.checkmark}>✓</Text>
-            )}
-          </Pressable>
-        </View>
+            <Pressable
+              style={styles.option}
+              onPress={() => setAfterSession('keep')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Keep last time</Text>
+                <Text style={styles.optionSubtitle}>
+                  Use the duration from the previous session
+                </Text>
+              </View>
+              {afterSession === 'keep' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>MUSIC PLAYBACK</Text>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setMusicPlayback('manual')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Manual</Text>
+                <Text style={styles.optionSubtitle}>
+                  Control music independently from the timer
+                </Text>
+              </View>
+              {musicPlayback === 'manual' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setMusicPlayback('sync')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Sync with Timer</Text>
+                <Text style={styles.optionSubtitle}>
+                  Start and pause music with the timer
+                </Text>
+              </View>
+              {musicPlayback === 'sync' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>SEASONAL THEME</Text>
+
+            {SEASONAL_THEMES.map((theme) => (
+              <Pressable
+                key={theme.id}
+                style={styles.option}
+                onPress={() => setSeasonalTheme(theme.id)}
+              >
+                <View
+                  style={[
+                    styles.themeSwatch,
+                    { backgroundColor: theme.background },
+                  ]}
+                />
+                <View style={styles.optionText}>
+                  <Text style={styles.optionTitle}>{theme.label}</Text>
+                </View>
+                {seasonalTheme === theme.id && (
+                  <Text style={styles.checkmark}>✓</Text>
+                )}
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
@@ -76,7 +150,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 36,
+    marginBottom: 24,
   },
 
   backButton: {
@@ -106,6 +180,11 @@ const styles = StyleSheet.create({
     width: 44,
   },
 
+  scrollContent: {
+    paddingBottom: 40,
+    gap: 28,
+  },
+
   section: {
     width: '100%',
     gap: 10,
@@ -128,6 +207,15 @@ const styles = StyleSheet.create({
     borderColor: '#BBBBBB',
     paddingVertical: 18,
     paddingHorizontal: 18,
+  },
+
+  themeSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BBBBBB',
+    marginRight: 14,
   },
 
   optionText: {
