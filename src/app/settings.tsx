@@ -1,10 +1,19 @@
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   SEASONAL_THEMES,
   useAfterSession,
+  type SessionPreset,
 } from '@/hooks/use-after-session';
 
 export default function Settings() {
@@ -14,9 +23,45 @@ export default function Settings() {
     setAfterSession,
     musicPlayback,
     setMusicPlayback,
+    whenTimeReachesZero,
+    setWhenTimeReachesZero,
+    sessionEndAlert,
+    setSessionEndAlert,
+    keepScreenAwake,
+    setKeepScreenAwake,
     seasonalTheme,
     setSeasonalTheme,
+    sessionPresets,
+    addSessionPreset,
+    updateSessionPreset,
+    deleteSessionPreset,
   } = useAfterSession();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState('');
+  const [draftMinutes, setDraftMinutes] = useState('');
+
+  const beginEditing = (preset: SessionPreset) => {
+    setEditingId(preset.id);
+    setDraftName(preset.name);
+    setDraftMinutes(String(preset.minutes));
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setDraftName('');
+    setDraftMinutes('');
+  };
+
+  const saveEditing = () => {
+    if (!editingId) return;
+
+    const parsedMinutes = Number.parseInt(draftMinutes, 10);
+    updateSessionPreset(editingId, {
+      name: draftName,
+      minutes: Number.isFinite(parsedMinutes) ? parsedMinutes : 1,
+    });
+    cancelEditing();
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -36,7 +81,86 @@ export default function Settings() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
         >
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>SESSION PRESETS</Text>
+
+            {sessionPresets.map((preset) => {
+              const isEditing = editingId === preset.id;
+
+              return (
+                <View key={preset.id} style={styles.option}>
+                  {isEditing ? (
+                    <View style={styles.presetEditArea}>
+                      <TextInput
+                        style={styles.presetInput}
+                        value={draftName}
+                        onChangeText={setDraftName}
+                        placeholder="Preset name"
+                        placeholderTextColor="#999999"
+                      />
+                      <TextInput
+                        style={styles.presetInput}
+                        value={draftMinutes}
+                        onChangeText={setDraftMinutes}
+                        placeholder="Minutes"
+                        placeholderTextColor="#999999"
+                        keyboardType="number-pad"
+                      />
+                      <View style={styles.presetActions}>
+                        <Pressable
+                          style={styles.presetActionButton}
+                          onPress={saveEditing}
+                        >
+                          <Text style={styles.presetActionText}>Save</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.presetActionButton}
+                          onPress={cancelEditing}
+                        >
+                          <Text style={styles.presetActionText}>Cancel</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <>
+                      <View style={styles.optionText}>
+                        <Text style={styles.optionTitle}>{preset.name}</Text>
+                        <Text style={styles.optionSubtitle}>
+                          {preset.minutes} minutes
+                        </Text>
+                      </View>
+                      <View style={styles.presetActions}>
+                        <Pressable
+                          style={styles.presetActionButton}
+                          onPress={() => beginEditing(preset)}
+                        >
+                          <Text style={styles.presetActionText}>Edit</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.presetActionButton}
+                          onPress={() => {
+                            if (editingId === preset.id) {
+                              cancelEditing();
+                            }
+                            deleteSessionPreset(preset.id);
+                          }}
+                        >
+                          <Text style={styles.presetActionText}>Delete</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  )}
+                </View>
+              );
+            })}
+
+            <Pressable style={styles.addPresetButton} onPress={addSessionPreset}>
+              <Text style={styles.addPresetText}>＋ Add Preset</Text>
+            </Pressable>
+          </View>
+
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>AFTER SESSION</Text>
 
@@ -66,6 +190,140 @@ export default function Settings() {
                 </Text>
               </View>
               {afterSession === 'keep' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>WHEN TIME REACHES ZERO</Text>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setWhenTimeReachesZero('overtime')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Continue to Overtime</Text>
+                <Text style={styles.optionSubtitle}>
+                  Keep counting overtime after remaining hits zero
+                </Text>
+              </View>
+              {whenTimeReachesZero === 'overtime' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setWhenTimeReachesZero('stop')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Stop at Zero</Text>
+                <Text style={styles.optionSubtitle}>
+                  Pause the timer when remaining reaches zero
+                </Text>
+              </View>
+              {whenTimeReachesZero === 'stop' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>SESSION END ALERT</Text>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setSessionEndAlert('none')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>None</Text>
+                <Text style={styles.optionSubtitle}>
+                  No alert when the session reaches zero
+                </Text>
+              </View>
+              {sessionEndAlert === 'none' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setSessionEndAlert('sound')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Sound</Text>
+                <Text style={styles.optionSubtitle}>
+                  Play a short chime when time reaches zero
+                </Text>
+              </View>
+              {sessionEndAlert === 'sound' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setSessionEndAlert('vibration')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Vibration</Text>
+                <Text style={styles.optionSubtitle}>
+                  Use a short vibration when time reaches zero
+                </Text>
+              </View>
+              {sessionEndAlert === 'vibration' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setSessionEndAlert('soundAndVibration')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Sound + Vibration</Text>
+                <Text style={styles.optionSubtitle}>
+                  Play a chime and vibrate when time reaches zero
+                </Text>
+              </View>
+              {sessionEndAlert === 'soundAndVibration' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              KEEP SCREEN AWAKE DURING SESSION
+            </Text>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setKeepScreenAwake('on')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>On</Text>
+                <Text style={styles.optionSubtitle}>
+                  Prevent auto-lock while the timer is running
+                </Text>
+              </View>
+              {keepScreenAwake === 'on' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setKeepScreenAwake('off')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Off</Text>
+                <Text style={styles.optionSubtitle}>
+                  Allow normal device auto-lock behavior
+                </Text>
+              </View>
+              {keepScreenAwake === 'off' && (
                 <Text style={styles.checkmark}>✓</Text>
               )}
             </Pressable>
@@ -241,5 +499,53 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: '#007AFF',
+  },
+
+  presetEditArea: {
+    flex: 1,
+    gap: 10,
+  },
+
+  presetInput: {
+    borderWidth: 1,
+    borderColor: '#CCCCCC',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#222222',
+    backgroundColor: '#FFFFFF',
+  },
+
+  presetActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  presetActionButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+
+  presetActionText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+
+  addPresetButton: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#BBBBBB',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+
+  addPresetText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#222222',
   },
 });

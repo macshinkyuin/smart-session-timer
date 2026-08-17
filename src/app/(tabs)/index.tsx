@@ -9,13 +9,52 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useAfterSession } from '@/hooks/use-after-session';
+import { KeepAwakeGuard } from '@/components/keep-awake-guard';
+import { useAfterSession, type SessionPreset } from '@/hooks/use-after-session';
+import { triggerSessionEndAlert } from '@/lib/session-end-alert';
 
 const HOLD_DELAY_MS = 350;
 const HOLD_INTERVAL_MS = 250;
+const SESSION_END_BEEP = require('@/assets/sounds/session-end-beep.wav');
+const BEEP_STATUS_POLL_MS = 50;
+const BEEP_FAILSAFE_TIMEOUT_MS = 2500;
+
+function waitForBeepCondition(
+  predicate: () => boolean,
+  timeoutMs: number
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (predicate()) {
+      resolve(true);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const intervalId = setInterval(() => {
+      if (predicate()) {
+        clearInterval(intervalId);
+        resolve(true);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(intervalId);
+        resolve(false);
+      }
+    }, BEEP_STATUS_POLL_MS);
+  });
+}
 
 export default function HomeScreen() {
-  const { afterSession, musicPlayback, seasonalBackground } = useAfterSession();
+  const {
+    afterSession,
+    musicPlayback,
+    whenTimeReachesZero,
+    sessionEndAlert,
+    keepScreenAwake,
+    seasonalBackground,
+    sessionPresets,
+  } = useAfterSession();
   const [currentTime, setCurrentTime] = useState('');
   const [totalMinutes, setTotalMinutes] = useState(60);
   const [presetVisible, setPresetVisible] = useState(false);
@@ -27,10 +66,79 @@ export default function HomeScreen() {
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const remainingSecondsRef = useRef(remainingSeconds);
   const overtimeSecondsRef = useRef(overtimeSeconds);
+  const endAlertFiredRef = useRef(false);
+  const sessionEndAlertRef = useRef(sessionEndAlert);
+  const playSessionEndBeepRef = useRef<
+    (options?: { shouldResumeMusic?: boolean }) => Promise<void>
+  >(async () => {});
   remainingSecondsRef.current = remainingSeconds;
   overtimeSecondsRef.current = overtimeSeconds;
+  sessionEndAlertRef.current = sessionEndAlert;
   const player = useAudioPlayer(musicUri ? { uri: musicUri } : null);
   const playbackStatus = useAudioPlayerStatus(player);
+  const beepPlayer = useAudioPlayer(SESSION_END_BEEP, {
+    updateInterval: 100,
+    keepAudioSessionActive: true,
+  });
+  const beepStatus = useAudioPlayerStatus(beepPlayer);
+  const beepStatusRef = useRef(beepStatus);
+  beepStatusRef.current = beepStatus;
+
+  useEffect(() => {
+    beepPlayer.volume = 1;
+  }, [beepPlayer]);
+
+  const playSessionEndBeep = async (options?: {
+    shouldResumeMusic?: boolean;
+  }) => {
+    try {
+      beepPlayer.volume = 1;
+      await beepPlayer.seekTo(0);
+      beepPlayer.play();
+
+      const didStart = await waitForBeepCondition(
+        () => beepStatusRef.current.playing,
+        BEEP_FAILSAFE_TIMEOUT_MS
+      );
+
+      if (!didStart) {
+        beepPlayer.play();
+        await waitForBeepCondition(
+          () => beepStatusRef.current.playing,
+          500
+        );
+      }
+
+      await waitForBeepCondition(
+        () =>
+          beepStatusRef.current.didJustFinish ||
+          (!beepStatusRef.current.playing &&
+            beepStatusRef.current.currentTime > 0.05),
+        BEEP_FAILSAFE_TIMEOUT_MS
+      );
+    } finally {
+      if (options?.shouldResumeMusic) {
+        try {
+          // Resume from the paused position; do not seek/reset music.
+          player.play();
+        } catch {
+          // Ignore resume failures.
+        }
+      }
+    }
+  };
+  playSessionEndBeepRef.current = playSessionEndBeep;
+
+  const applySessionPreset = (preset: SessionPreset) => {
+    const minutes = Math.max(1, preset.minutes);
+    setTotalMinutes(minutes);
+    setRemainingSeconds(minutes * 60);
+    remainingSecondsRef.current = minutes * 60;
+    setOvertimeSeconds(0);
+    overtimeSecondsRef.current = 0;
+    setIsRunning(false);
+    setPresetVisible(false);
+  };
 
   const pickMusic = async () => {
     const result = await DocumentPicker.getDocumentAsync({
@@ -95,9 +203,15 @@ export default function HomeScreen() {
       playsInSilentMode: true,
       allowsRecording: false,
       shouldRouteThroughEarpiece: false,
-      interruptionMode: 'doNotMix',
+      interruptionMode: 'mixWithOthers',
     });
   }, []);
+
+  useEffect(() => {
+    if (remainingSeconds > 0) {
+      endAlertFiredRef.current = false;
+    }
+  }, [remainingSeconds]);
 
   const adjustTime = (deltaMinutes: number) => {
     setTotalMinutes((prevTotal) => {
@@ -170,26 +284,67 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (!isRunning) return;
-  
+
     const timer = setInterval(() => {
       setRemainingSeconds((prev) => {
-        if (prev > 0) {
+        if (prev > 1) {
           return prev - 1;
         }
-  
+
+        if (prev === 1) {
+          if (!endAlertFiredRef.current) {
+            endAlertFiredRef.current = true;
+
+            const musicWasPlaying = Boolean(musicUri) && player.playing;
+            if (musicWasPlaying) {
+              // Pause immediately so the full double-beep is audible.
+              player.pause();
+            }
+
+            const shouldResumeMusic =
+              musicWasPlaying &&
+              (musicPlayback === 'manual' ||
+                (musicPlayback === 'sync' &&
+                  whenTimeReachesZero === 'overtime'));
+
+            void triggerSessionEndAlert(sessionEndAlertRef.current, () =>
+              playSessionEndBeepRef.current({ shouldResumeMusic })
+            );
+          }
+
+          if (whenTimeReachesZero === 'stop') {
+            setIsRunning(false);
+            setOvertimeSeconds(0);
+            if (musicPlayback === 'sync' && musicUri) {
+              player.pause();
+            }
+          }
+          return 0;
+        }
+
+        if (whenTimeReachesZero === 'stop') {
+          setIsRunning(false);
+          setOvertimeSeconds(0);
+          if (musicPlayback === 'sync' && musicUri) {
+            player.pause();
+          }
+          return 0;
+        }
+
         setOvertimeSeconds((overtime) => overtime + 1);
         return 0;
       });
     }, 1000);
-  
+
     return () => clearInterval(timer);
-  }, [isRunning]);
+  }, [isRunning, whenTimeReachesZero, musicPlayback, musicUri, player]);
 
 
   return (
     <SafeAreaView
       style={[styles.safeArea, { backgroundColor: seasonalBackground }]}
     >
+      {keepScreenAwake === 'on' && isRunning ? <KeepAwakeGuard /> : null}
       <View style={styles.container}>
         <Text style={styles.title}>SMART SESSION TIMER</Text>
         <Pressable
@@ -209,19 +364,13 @@ export default function HomeScreen() {
 
           {presetVisible && (
             <View style={styles.presetInline}>
-              {[30, 45, 60, 90, 120].map((minutes) => (
+              {sessionPresets.map((preset) => (
                 <Pressable
-                  key={minutes}
+                  key={preset.id}
                   style={styles.presetInlineButton}
-                  onPress={() => {
-                    setTotalMinutes(minutes);
-                    setRemainingSeconds(minutes * 60);
-                    setOvertimeSeconds(0);
-                    setIsRunning(false);
-                    setPresetVisible(false);
-                  }}
+                  onPress={() => applySessionPreset(preset)}
                 >
-                  <Text style={styles.presetInlineText}>{minutes}</Text>
+                  <Text style={styles.presetInlineText}>{preset.name}</Text>
                 </Pressable>
               ))}
             </View>
