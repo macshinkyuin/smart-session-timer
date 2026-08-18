@@ -23,6 +23,8 @@ export default function Settings() {
     setAfterSession,
     musicPlayback,
     setMusicPlayback,
+    musicRepeat,
+    setMusicRepeat,
     whenTimeReachesZero,
     setWhenTimeReachesZero,
     sessionEndAlert,
@@ -358,6 +360,40 @@ export default function Settings() {
                 </Text>
               </View>
               {musicPlayback === 'sync' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>MUSIC REPEAT</Text>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setMusicRepeat('off')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Off</Text>
+                <Text style={styles.optionSubtitle}>
+                  Play the selected song once and stop at the end
+                </Text>
+              </View>
+              {musicRepeat === 'off' && (
+                <Text style={styles.checkmark}>✓</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.option}
+              onPress={() => setMusicRepeat('repeatOne')}
+            >
+              <View style={styles.optionText}>
+                <Text style={styles.optionTitle}>Repeat One</Text>
+                <Text style={styles.optionSubtitle}>
+                  Continuously loop the currently selected song
+                </Text>
+              </View>
+              {musicRepeat === 'repeatOne' && (
                 <Text style={styles.checkmark}>✓</Text>
               )}
             </Pressable>

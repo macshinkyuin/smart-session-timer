@@ -6,7 +6,7 @@ import {
 } from 'expo-audio';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { KeepAwakeGuard } from '@/components/keep-awake-guard';
@@ -49,6 +49,7 @@ export default function HomeScreen() {
   const {
     afterSession,
     musicPlayback,
+    musicRepeat,
     whenTimeReachesZero,
     sessionEndAlert,
     keepScreenAwake,
@@ -63,6 +64,7 @@ export default function HomeScreen() {
   const [isRunning, setIsRunning] = useState(false);
   const [musicUri, setMusicUri] = useState<string | null>(null);
   const [musicName, setMusicName] = useState<string | null>(null);
+  const [controlsLocked, setControlsLocked] = useState(false);
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const remainingSecondsRef = useRef(remainingSeconds);
   const overtimeSecondsRef = useRef(overtimeSeconds);
@@ -87,6 +89,10 @@ export default function HomeScreen() {
   useEffect(() => {
     beepPlayer.volume = 1;
   }, [beepPlayer]);
+
+  useEffect(() => {
+    player.loop = musicRepeat === 'repeatOne';
+  }, [player, musicRepeat]);
 
   const playSessionEndBeep = async (options?: {
     shouldResumeMusic?: boolean;
@@ -214,6 +220,8 @@ export default function HomeScreen() {
   }, [remainingSeconds]);
 
   const adjustTime = (deltaMinutes: number) => {
+    if (controlsLocked) return;
+
     setTotalMinutes((prevTotal) => {
       const newTotal = Math.max(1, prevTotal + deltaMinutes);
       const actualDelta = newTotal - prevTotal;
@@ -253,12 +261,23 @@ export default function HomeScreen() {
   };
 
   const startHoldAdjust = (deltaMinutes: number) => {
+    if (controlsLocked) return;
     clearHoldTimers();
     adjustTime(deltaMinutes);
     holdIntervalRef.current = setInterval(() => {
       adjustTime(deltaMinutes);
     }, HOLD_INTERVAL_MS);
   };
+
+  const toggleControlsLock = () => {
+    setControlsLocked((prev) => !prev);
+  };
+
+  useEffect(() => {
+    if (!controlsLocked) return;
+    clearHoldTimers();
+    setPresetVisible(false);
+  }, [controlsLocked]);
 
   useEffect(() => () => clearHoldTimers(), []);
 
@@ -345,24 +364,51 @@ export default function HomeScreen() {
       style={[styles.safeArea, { backgroundColor: seasonalBackground }]}
     >
       {keepScreenAwake === 'on' && isRunning ? <KeepAwakeGuard /> : null}
-      <View style={styles.container}>
-        <Text style={styles.title}>SMART SESSION TIMER</Text>
-        <Pressable
-          style={styles.settingsButton}
-          onPress={() => router.push('/settings')}
-        >
-          <Text style={styles.settingsIcon}>⚙️</Text>
-        </Pressable>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.headerRow}>
+          <Pressable
+            style={styles.lockButton}
+            onPress={toggleControlsLock}
+            hitSlop={8}
+          >
+            <Text style={styles.lockIcon}>{controlsLocked ? '🔒' : '🔓'}</Text>
+          </Pressable>
+          <Text style={styles.title}>SMART SESSION TIMER</Text>
+          <Pressable
+            style={styles.settingsButton}
+            onPress={() => router.push('/settings')}
+          >
+            <Text style={styles.settingsIcon}>⚙️</Text>
+          </Pressable>
+        </View>
 
         <Text style={styles.clock}>{currentTime}</Text>
 
         <View style={styles.section}>
           <Text style={styles.label}>TOTAL TIME</Text>
-          <Pressable onPress={() => setPresetVisible((prev) => !prev)}>
-            <Text style={styles.totalTime}>{totalMinutes}:00</Text>
+          <Pressable
+            disabled={controlsLocked}
+            onPress={() => {
+              if (controlsLocked) return;
+              setPresetVisible((prev) => !prev);
+            }}
+          >
+            <Text
+              style={[
+                styles.totalTime,
+                controlsLocked && styles.controlDisabledText,
+              ]}
+            >
+              {totalMinutes}:00
+            </Text>
           </Pressable>
 
-          {presetVisible && (
+          {presetVisible && !controlsLocked && (
             <View style={styles.presetInline}>
               {sessionPresets.map((preset) => (
                 <Pressable
@@ -378,9 +424,25 @@ export default function HomeScreen() {
 
           <View style={styles.adjustRow}>
             <Pressable
-              style={styles.adjustButton}
-              onPress={() => adjustTime(-1)}
-              onLongPress={() => startHoldAdjust(-5)}
+              style={[
+                styles.adjustButton,
+                controlsLocked && styles.controlDisabled,
+              ]}
+              disabled={controlsLocked}
+              onPress={
+                controlsLocked
+                  ? undefined
+                  : () => {
+                      adjustTime(-1);
+                    }
+              }
+              onLongPress={
+                controlsLocked
+                  ? undefined
+                  : () => {
+                      startHoldAdjust(-5);
+                    }
+              }
               onPressOut={clearHoldTimers}
               delayLongPress={HOLD_DELAY_MS}
             >
@@ -388,13 +450,64 @@ export default function HomeScreen() {
             </Pressable>
 
             <Pressable
-              style={styles.adjustButton}
-              onPress={() => adjustTime(1)}
-              onLongPress={() => startHoldAdjust(5)}
+              style={[
+                styles.adjustButton,
+                controlsLocked && styles.controlDisabled,
+              ]}
+              disabled={controlsLocked}
+              onPress={
+                controlsLocked
+                  ? undefined
+                  : () => {
+                      adjustTime(1);
+                    }
+              }
+              onLongPress={
+                controlsLocked
+                  ? undefined
+                  : () => {
+                      startHoldAdjust(5);
+                    }
+              }
               onPressOut={clearHoldTimers}
               delayLongPress={HOLD_DELAY_MS}
             >
               <Text style={styles.adjustText}>＋</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.quickAddRow}>
+            <Pressable
+              style={[
+                styles.quickAddButton,
+                controlsLocked && styles.controlDisabled,
+              ]}
+              disabled={controlsLocked}
+              onPress={
+                controlsLocked
+                  ? undefined
+                  : () => {
+                      adjustTime(5);
+                    }
+              }
+            >
+              <Text style={styles.quickAddText}>+5 min</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.quickAddButton,
+                controlsLocked && styles.controlDisabled,
+              ]}
+              disabled={controlsLocked}
+              onPress={
+                controlsLocked
+                  ? undefined
+                  : () => {
+                      adjustTime(10);
+                    }
+              }
+            >
+              <Text style={styles.quickAddText}>+10 min</Text>
             </Pressable>
           </View>
         </View>
@@ -426,8 +539,10 @@ export default function HomeScreen() {
           </Text>
         </Pressable>
         <Pressable
-          style={styles.endButton}
+          style={[styles.endButton, controlsLocked && styles.controlDisabled]}
+          disabled={controlsLocked}
           onPress={() => {
+            if (controlsLocked) return;
             setIsRunning(false);
             setOvertimeSeconds(0);
             stopMusic();
@@ -445,7 +560,14 @@ export default function HomeScreen() {
 
         <View style={styles.audioArea}>
           <View style={styles.musicRow}>
-            <Pressable onPress={pickMusic} style={styles.musicSelect}>
+            <Pressable
+              onPress={() => {
+                if (controlsLocked) return;
+                void pickMusic();
+              }}
+              disabled={controlsLocked}
+              style={styles.musicSelect}
+            >
               <Text style={styles.audioText}>
                 ♫ {musicName ?? 'No Music Selected'}
               </Text>
@@ -460,7 +582,7 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.audioText}>🔊 Device Speaker</Text>
         </View>
-      </View>
+      </ScrollView>
      </SafeAreaView>
   );
 }
@@ -470,18 +592,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  container: {
+  scroll: {
     flex: 1,
+  },
+
+  container: {
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingTop: 20,
+    paddingBottom: 48,
   },
 
   title: {
+    flex: 1,
     fontSize: 20,
     fontWeight: '700',
     letterSpacing: 1.5,
-    marginBottom: 18,
+    textAlign: 'center',
   },
 
   clock: {
@@ -512,7 +639,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 30,
     marginTop: 15,
-    marginBottom: 35,
+    marginBottom: 6,
   },
 
   adjustButton: {
@@ -529,6 +656,28 @@ const styles = StyleSheet.create({
   adjustText: {
     fontSize: 36,
     fontWeight: '400',
+  },
+
+  quickAddRow: {
+    flexDirection: 'row',
+    gap: 30,
+    marginBottom: 28,
+  },
+
+  quickAddButton: {
+    width: 80,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#BBBBBB',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  quickAddText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 
   timeRow: {
@@ -628,10 +777,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  headerRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+
   settingsButton: {
-    position: 'absolute',
-    top: 18,
-    right: 20,
     width: 44,
     height: 44,
     alignItems: 'center',
@@ -642,4 +795,22 @@ const styles = StyleSheet.create({
     fontSize: 28,
   },
 
+  lockButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  lockIcon: {
+    fontSize: 26,
+  },
+
+  controlDisabled: {
+    opacity: 0.4,
+  },
+
+  controlDisabledText: {
+    opacity: 0.45,
+  },
 });

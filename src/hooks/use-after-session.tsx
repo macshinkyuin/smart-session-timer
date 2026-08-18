@@ -9,6 +9,7 @@ import {
 
 export type AfterSessionOption = 'reset' | 'keep';
 export type MusicPlaybackOption = 'manual' | 'sync';
+export type MusicRepeatOption = 'off' | 'repeatOne';
 export type WhenTimeReachesZeroOption = 'overtime' | 'stop';
 export type SessionEndAlertOption =
   | 'none'
@@ -43,6 +44,7 @@ export const SEASONAL_THEMES: {
 
 const AFTER_SESSION_KEY = 'afterSessionOption';
 const MUSIC_PLAYBACK_KEY = 'musicPlaybackOption';
+const MUSIC_REPEAT_KEY = 'musicRepeatOption';
 const WHEN_TIME_REACHES_ZERO_KEY = 'whenTimeReachesZeroOption';
 const SESSION_END_ALERT_KEY = 'sessionEndAlertOption';
 const KEEP_SCREEN_AWAKE_KEY = 'keepScreenAwakeOption';
@@ -51,6 +53,7 @@ const SESSION_PRESETS_KEY = 'sessionPresets';
 
 const DEFAULT_AFTER_SESSION: AfterSessionOption = 'reset';
 const DEFAULT_MUSIC_PLAYBACK: MusicPlaybackOption = 'manual';
+const DEFAULT_MUSIC_REPEAT: MusicRepeatOption = 'off';
 const DEFAULT_WHEN_TIME_REACHES_ZERO: WhenTimeReachesZeroOption = 'overtime';
 const DEFAULT_SESSION_END_ALERT: SessionEndAlertOption = 'soundAndVibration';
 const DEFAULT_KEEP_SCREEN_AWAKE: KeepScreenAwakeOption = 'on';
@@ -66,6 +69,8 @@ type SettingsContextValue = {
   setAfterSession: (value: AfterSessionOption) => void;
   musicPlayback: MusicPlaybackOption;
   setMusicPlayback: (value: MusicPlaybackOption) => void;
+  musicRepeat: MusicRepeatOption;
+  setMusicRepeat: (value: MusicRepeatOption) => void;
   whenTimeReachesZero: WhenTimeReachesZeroOption;
   setWhenTimeReachesZero: (value: WhenTimeReachesZeroOption) => void;
   sessionEndAlert: SessionEndAlertOption;
@@ -94,6 +99,10 @@ function isMusicPlaybackOption(
   value: string | null
 ): value is MusicPlaybackOption {
   return value === 'manual' || value === 'sync';
+}
+
+function isMusicRepeatOption(value: string | null): value is MusicRepeatOption {
+  return value === 'off' || value === 'repeatOne';
 }
 
 function isWhenTimeReachesZeroOption(
@@ -184,6 +193,8 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
     useState<AfterSessionOption>(DEFAULT_AFTER_SESSION);
   const [musicPlayback, setMusicPlaybackState] =
     useState<MusicPlaybackOption>(DEFAULT_MUSIC_PLAYBACK);
+  const [musicRepeat, setMusicRepeatState] =
+    useState<MusicRepeatOption>(DEFAULT_MUSIC_REPEAT);
   const [whenTimeReachesZero, setWhenTimeReachesZeroState] =
     useState<WhenTimeReachesZeroOption>(DEFAULT_WHEN_TIME_REACHES_ZERO);
   const [sessionEndAlert, setSessionEndAlertState] =
@@ -200,6 +211,7 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
     Promise.all([
       AsyncStorage.getItem(AFTER_SESSION_KEY),
       AsyncStorage.getItem(MUSIC_PLAYBACK_KEY),
+      AsyncStorage.getItem(MUSIC_REPEAT_KEY),
       AsyncStorage.getItem(WHEN_TIME_REACHES_ZERO_KEY),
       AsyncStorage.getItem(SESSION_END_ALERT_KEY),
       AsyncStorage.getItem(KEEP_SCREEN_AWAKE_KEY),
@@ -209,6 +221,7 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
       ([
         storedAfterSession,
         storedMusicPlayback,
+        storedMusicRepeat,
         storedWhenTimeReachesZero,
         storedSessionEndAlert,
         storedKeepScreenAwake,
@@ -220,6 +233,9 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
         }
         if (isMusicPlaybackOption(storedMusicPlayback)) {
           setMusicPlaybackState(storedMusicPlayback);
+        }
+        if (isMusicRepeatOption(storedMusicRepeat)) {
+          setMusicRepeatState(storedMusicRepeat);
         }
         if (isWhenTimeReachesZeroOption(storedWhenTimeReachesZero)) {
           setWhenTimeReachesZeroState(storedWhenTimeReachesZero);
@@ -254,6 +270,11 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
   const setMusicPlayback = (value: MusicPlaybackOption) => {
     setMusicPlaybackState(value);
     AsyncStorage.setItem(MUSIC_PLAYBACK_KEY, value);
+  };
+
+  const setMusicRepeat = (value: MusicRepeatOption) => {
+    setMusicRepeatState(value);
+    AsyncStorage.setItem(MUSIC_REPEAT_KEY, value);
   };
 
   const setWhenTimeReachesZero = (value: WhenTimeReachesZeroOption) => {
@@ -320,6 +341,8 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
         setAfterSession,
         musicPlayback,
         setMusicPlayback,
+        musicRepeat,
+        setMusicRepeat,
         whenTimeReachesZero,
         setWhenTimeReachesZero,
         sessionEndAlert,
