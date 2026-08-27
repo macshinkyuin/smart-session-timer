@@ -19,6 +19,11 @@ const SESSION_END_BEEP = require('@/assets/sounds/session-end-beep.wav');
 const BEEP_STATUS_POLL_MS = 50;
 const BEEP_FAILSAFE_TIMEOUT_MS = 2500;
 
+type PlaylistTrack = {
+  uri: string;
+  name: string;
+};
+
 function waitForBeepCondition(
   predicate: () => boolean,
   timeoutMs: number
@@ -62,21 +67,25 @@ export default function HomeScreen() {
   const [remainingSeconds, setRemainingSeconds] = useState(60 * 60);
   const [overtimeSeconds, setOvertimeSeconds] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
-  const [musicUri, setMusicUri] = useState<string | null>(null);
-  const [musicName, setMusicName] = useState<string | null>(null);
+  const [playlist, setPlaylist] = useState<PlaylistTrack[]>([]);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [controlsLocked, setControlsLocked] = useState(false);
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const remainingSecondsRef = useRef(remainingSeconds);
   const overtimeSecondsRef = useRef(overtimeSeconds);
   const endAlertFiredRef = useRef(false);
   const sessionEndAlertRef = useRef(sessionEndAlert);
+  const playlistAdvanceLockedRef = useRef(false);
+  const autoPlayAfterTrackChangeRef = useRef(false);
+  const sawTrackFinishRef = useRef(false);
   const playSessionEndBeepRef = useRef<
     (options?: { shouldResumeMusic?: boolean }) => Promise<void>
   >(async () => {});
   remainingSecondsRef.current = remainingSeconds;
   overtimeSecondsRef.current = overtimeSeconds;
   sessionEndAlertRef.current = sessionEndAlert;
-  const player = useAudioPlayer(musicUri ? { uri: musicUri } : null);
+  const currentTrack = playlist[currentTrackIndex] ?? null;
+  const player = useAudioPlayer(currentTrack ? { uri: currentTrack.uri } : null);
   const playbackStatus = useAudioPlayerStatus(player);
   const beepPlayer = useAudioPlayer(SESSION_END_BEEP, {
     updateInterval: 100,
@@ -131,6 +140,7 @@ export default function HomeScreen() {
           // Ignore resume failures.
         }
       }
+      playlistAdvanceLockedRef.current = false;
     }
   };
   playSessionEndBeepRef.current = playSessionEndBeep;
@@ -144,31 +154,43 @@ export default function HomeScreen() {
     overtimeSecondsRef.current = 0;
     setIsRunning(false);
     setPresetVisible(false);
+
+    if (musicPlayback === 'sync' && currentTrack) {
+      player.pause();
+    }
   };
 
   const pickMusic = async () => {
     const result = await DocumentPicker.getDocumentAsync({
       type: 'audio/*',
       copyToCacheDirectory: true,
-      multiple: false,
+      multiple: true,
     });
 
-    if (result.canceled || !result.assets?.[0]) {
+    if (result.canceled || !result.assets?.length) {
       return;
     }
 
-    const asset = result.assets[0];
-    setMusicUri(asset.uri);
-    setMusicName(asset.name);
+    const tracks = result.assets.map((asset) => ({
+      uri: asset.uri,
+      name: asset.name || 'Audio',
+    }));
+    autoPlayAfterTrackChangeRef.current = false;
+    sawTrackFinishRef.current = false;
+    setPlaylist(tracks);
+    setCurrentTrackIndex(0);
   };
 
   const stopMusic = () => {
+    autoPlayAfterTrackChangeRef.current = false;
+    sawTrackFinishRef.current = false;
+    setCurrentTrackIndex(0);
     player.pause();
     void player.seekTo(0);
   };
 
   const playMusicFromCurrentPosition = () => {
-    if (!musicUri) return;
+    if (!currentTrack) return;
 
     if (playbackStatus.didJustFinish) {
       void player.seekTo(0).then(() => {
@@ -181,7 +203,7 @@ export default function HomeScreen() {
   };
 
   const toggleMusicPlayback = () => {
-    if (!musicUri) return;
+    if (!currentTrack) return;
 
     if (playbackStatus.playing) {
       player.pause();
@@ -195,7 +217,7 @@ export default function HomeScreen() {
     const nextRunning = !isRunning;
     setIsRunning(nextRunning);
 
-    if (musicPlayback === 'sync' && musicUri) {
+    if (musicPlayback === 'sync' && currentTrack) {
       if (nextRunning) {
         playMusicFromCurrentPosition();
       } else {
@@ -218,6 +240,44 @@ export default function HomeScreen() {
       endAlertFiredRef.current = false;
     }
   }, [remainingSeconds]);
+
+  useEffect(() => {
+    if (!playbackStatus.didJustFinish) {
+      sawTrackFinishRef.current = false;
+      return;
+    }
+
+    if (sawTrackFinishRef.current) return;
+    sawTrackFinishRef.current = true;
+
+    if (playlistAdvanceLockedRef.current) return;
+    if (musicRepeat === 'repeatOne') return;
+    if (playlist.length <= 1) return;
+    if (currentTrackIndex >= playlist.length - 1) return;
+
+    autoPlayAfterTrackChangeRef.current = true;
+    setCurrentTrackIndex((index) => index + 1);
+  }, [
+    playbackStatus.didJustFinish,
+    musicRepeat,
+    playlist.length,
+    currentTrackIndex,
+  ]);
+
+  useEffect(() => {
+    if (!autoPlayAfterTrackChangeRef.current) return;
+    if (!currentTrack) return;
+    if (!playbackStatus.isLoaded) return;
+
+    autoPlayAfterTrackChangeRef.current = false;
+    sawTrackFinishRef.current = false;
+    player.play();
+  }, [
+    currentTrackIndex,
+    currentTrack,
+    playbackStatus.isLoaded,
+    player,
+  ]);
 
   const adjustTime = (deltaMinutes: number) => {
     if (controlsLocked) return;
@@ -314,9 +374,11 @@ export default function HomeScreen() {
           if (!endAlertFiredRef.current) {
             endAlertFiredRef.current = true;
 
-            const musicWasPlaying = Boolean(musicUri) && player.playing;
+            const musicWasPlaying = Boolean(currentTrack) && player.playing;
             if (musicWasPlaying) {
               // Pause immediately so the full double-beep is audible.
+              // Lock playlist advance so track-end cannot race the beep.
+              playlistAdvanceLockedRef.current = true;
               player.pause();
             }
 
@@ -328,13 +390,16 @@ export default function HomeScreen() {
 
             void triggerSessionEndAlert(sessionEndAlertRef.current, () =>
               playSessionEndBeepRef.current({ shouldResumeMusic })
-            );
+            ).finally(() => {
+              // Clear advance lock even when sound/beep is not used.
+              playlistAdvanceLockedRef.current = false;
+            });
           }
 
           if (whenTimeReachesZero === 'stop') {
             setIsRunning(false);
             setOvertimeSeconds(0);
-            if (musicPlayback === 'sync' && musicUri) {
+            if (musicPlayback === 'sync' && currentTrack) {
               player.pause();
             }
           }
@@ -344,7 +409,7 @@ export default function HomeScreen() {
         if (whenTimeReachesZero === 'stop') {
           setIsRunning(false);
           setOvertimeSeconds(0);
-          if (musicPlayback === 'sync' && musicUri) {
+          if (musicPlayback === 'sync' && currentTrack) {
             player.pause();
           }
           return 0;
@@ -356,7 +421,7 @@ export default function HomeScreen() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isRunning, whenTimeReachesZero, musicPlayback, musicUri, player]);
+  }, [isRunning, whenTimeReachesZero, musicPlayback, currentTrack, player]);
 
 
   return (
@@ -559,7 +624,7 @@ export default function HomeScreen() {
         </Pressable>
 
         <View style={styles.audioArea}>
-          <View style={styles.musicRow}>
+          <View style={styles.musicCard}>
             <Pressable
               onPress={() => {
                 if (controlsLocked) return;
@@ -568,19 +633,33 @@ export default function HomeScreen() {
               disabled={controlsLocked}
               style={styles.musicSelect}
             >
-              <Text style={styles.audioText}>
-                ♫ {musicName ?? 'No Music Selected'}
-              </Text>
+              <Text style={styles.musicIcon}>♫</Text>
+              <View style={styles.musicTextBlock}>
+                <Text style={styles.audioText} numberOfLines={1}>
+                  {currentTrack?.name ?? 'No Music Selected'}
+                  {playlist.length > 1
+                    ? `  ${currentTrackIndex + 1} / ${playlist.length}`
+                    : ''}
+                </Text>
+                {!currentTrack ? (
+                  <Text style={styles.musicHint}>
+                    Choose MP3/audio files saved in Files
+                  </Text>
+                ) : null}
+              </View>
             </Pressable>
-            {musicUri ? (
-              <Pressable onPress={toggleMusicPlayback} hitSlop={8}>
+            {currentTrack ? (
+              <Pressable
+                onPress={toggleMusicPlayback}
+                hitSlop={8}
+                style={styles.musicPlayButton}
+              >
                 <Text style={styles.audioText}>
                   {playbackStatus.playing ? '⏸' : '▶'}
                 </Text>
               </Pressable>
             ) : null}
           </View>
-          <Text style={styles.audioText}>🔊 Device Speaker</Text>
         </View>
       </ScrollView>
      </SafeAreaView>
@@ -735,22 +814,52 @@ const styles = StyleSheet.create({
 
   audioArea: {
     width: '100%',
-    marginTop: 28,
-    gap: 12,
+    marginTop: 18,
   },
 
-  musicRow: {
+  musicCard: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    backgroundColor: '#FFFFFF',
   },
 
   musicSelect: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+  },
+
+  musicIcon: {
+    fontSize: 18,
+  },
+
+  musicTextBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+
+  musicPlayButton: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
 
   audioText: {
     fontSize: 16,
+  },
+
+  musicHint: {
+    fontSize: 13,
+    color: '#888888',
   },
 
   presetInline: {
