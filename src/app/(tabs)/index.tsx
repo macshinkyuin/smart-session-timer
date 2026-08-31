@@ -1,9 +1,9 @@
-import * as DocumentPicker from 'expo-document-picker';
 import {
   setAudioModeAsync,
   useAudioPlayer,
   useAudioPlayerStatus,
 } from 'expo-audio';
+import * as DocumentPicker from 'expo-document-picker';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -53,6 +53,9 @@ function waitForBeepCondition(
 export default function HomeScreen() {
   const {
     afterSession,
+    lastTotalMinutes,
+    setLastTotalMinutes,
+    settingsReady,
     musicPlayback,
     musicRepeat,
     whenTimeReachesZero,
@@ -78,6 +81,7 @@ export default function HomeScreen() {
   const playlistAdvanceLockedRef = useRef(false);
   const autoPlayAfterTrackChangeRef = useRef(false);
   const sawTrackFinishRef = useRef(false);
+  const hasAppliedLaunchDurationRef = useRef(false);
   const playSessionEndBeepRef = useRef<
     (options?: { shouldResumeMusic?: boolean }) => Promise<void>
   >(async () => {});
@@ -154,6 +158,10 @@ export default function HomeScreen() {
     overtimeSecondsRef.current = 0;
     setIsRunning(false);
     setPresetVisible(false);
+
+    if (afterSession === 'keep') {
+      setLastTotalMinutes(minutes);
+    }
 
     if (musicPlayback === 'sync' && currentTrack) {
       player.pause();
@@ -242,6 +250,21 @@ export default function HomeScreen() {
   }, [remainingSeconds]);
 
   useEffect(() => {
+    if (!settingsReady || hasAppliedLaunchDurationRef.current) return;
+    hasAppliedLaunchDurationRef.current = true;
+
+    if (afterSession !== 'keep') return;
+
+    const minutes = Math.max(1, lastTotalMinutes);
+    setTotalMinutes(minutes);
+    setRemainingSeconds(minutes * 60);
+    remainingSecondsRef.current = minutes * 60;
+    setOvertimeSeconds(0);
+    overtimeSecondsRef.current = 0;
+    setIsRunning(false);
+  }, [settingsReady, afterSession, lastTotalMinutes]);
+
+  useEffect(() => {
     if (!playbackStatus.didJustFinish) {
       sawTrackFinishRef.current = false;
       return;
@@ -306,6 +329,10 @@ export default function HomeScreen() {
           overtimeSecondsRef.current = Math.abs(newBalance);
           setRemainingSeconds(0);
           setOvertimeSeconds(Math.abs(newBalance));
+        }
+
+        if (afterSession === 'keep') {
+          setLastTotalMinutes(newTotal);
         }
       }
 

@@ -43,6 +43,7 @@ export const SEASONAL_THEMES: {
 ];
 
 const AFTER_SESSION_KEY = 'afterSessionOption';
+const LAST_TOTAL_MINUTES_KEY = 'lastTotalMinutes';
 const MUSIC_PLAYBACK_KEY = 'musicPlaybackOption';
 const MUSIC_REPEAT_KEY = 'musicRepeatOption';
 const WHEN_TIME_REACHES_ZERO_KEY = 'whenTimeReachesZeroOption';
@@ -52,6 +53,7 @@ const SEASONAL_THEME_KEY = 'seasonalTheme';
 const SESSION_PRESETS_KEY = 'sessionPresets';
 
 const DEFAULT_AFTER_SESSION: AfterSessionOption = 'reset';
+const DEFAULT_LAST_TOTAL_MINUTES = 60;
 const DEFAULT_MUSIC_PLAYBACK: MusicPlaybackOption = 'manual';
 const DEFAULT_MUSIC_REPEAT: MusicRepeatOption = 'off';
 const DEFAULT_WHEN_TIME_REACHES_ZERO: WhenTimeReachesZeroOption = 'overtime';
@@ -67,6 +69,9 @@ const DEFAULT_SESSION_PRESETS: SessionPreset[] = [
 type SettingsContextValue = {
   afterSession: AfterSessionOption;
   setAfterSession: (value: AfterSessionOption) => void;
+  lastTotalMinutes: number;
+  setLastTotalMinutes: (value: number) => void;
+  settingsReady: boolean;
   musicPlayback: MusicPlaybackOption;
   setMusicPlayback: (value: MusicPlaybackOption) => void;
   musicRepeat: MusicRepeatOption;
@@ -93,6 +98,14 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 function isAfterSessionOption(value: string | null): value is AfterSessionOption {
   return value === 'reset' || value === 'keep';
+}
+
+function parseLastTotalMinutes(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const minutes = Math.max(1, Math.round(parsed));
+  return minutes;
 }
 
 function isMusicPlaybackOption(
@@ -191,6 +204,10 @@ function createPresetId() {
 export function AfterSessionProvider({ children }: { children: ReactNode }) {
   const [afterSession, setAfterSessionState] =
     useState<AfterSessionOption>(DEFAULT_AFTER_SESSION);
+  const [lastTotalMinutes, setLastTotalMinutesState] = useState(
+    DEFAULT_LAST_TOTAL_MINUTES
+  );
+  const [settingsReady, setSettingsReady] = useState(false);
   const [musicPlayback, setMusicPlaybackState] =
     useState<MusicPlaybackOption>(DEFAULT_MUSIC_PLAYBACK);
   const [musicRepeat, setMusicRepeatState] =
@@ -210,6 +227,7 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     Promise.all([
       AsyncStorage.getItem(AFTER_SESSION_KEY),
+      AsyncStorage.getItem(LAST_TOTAL_MINUTES_KEY),
       AsyncStorage.getItem(MUSIC_PLAYBACK_KEY),
       AsyncStorage.getItem(MUSIC_REPEAT_KEY),
       AsyncStorage.getItem(WHEN_TIME_REACHES_ZERO_KEY),
@@ -220,6 +238,7 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
     ]).then(
       ([
         storedAfterSession,
+        storedLastTotalMinutes,
         storedMusicPlayback,
         storedMusicRepeat,
         storedWhenTimeReachesZero,
@@ -230,6 +249,10 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
       ]) => {
         if (isAfterSessionOption(storedAfterSession)) {
           setAfterSessionState(storedAfterSession);
+        }
+        const minutes = parseLastTotalMinutes(storedLastTotalMinutes);
+        if (minutes !== null) {
+          setLastTotalMinutesState(minutes);
         }
         if (isMusicPlaybackOption(storedMusicPlayback)) {
           setMusicPlaybackState(storedMusicPlayback);
@@ -254,7 +277,9 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
           setSessionPresetsState(presets);
         }
       }
-    );
+    ).finally(() => {
+      setSettingsReady(true);
+    });
   }, []);
 
   const persistSessionPresets = (presets: SessionPreset[]) => {
@@ -265,6 +290,12 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
   const setAfterSession = (value: AfterSessionOption) => {
     setAfterSessionState(value);
     AsyncStorage.setItem(AFTER_SESSION_KEY, value);
+  };
+
+  const setLastTotalMinutes = (value: number) => {
+    const minutes = Math.max(1, Math.round(value));
+    setLastTotalMinutesState(minutes);
+    AsyncStorage.setItem(LAST_TOTAL_MINUTES_KEY, String(minutes));
   };
 
   const setMusicPlayback = (value: MusicPlaybackOption) => {
@@ -339,6 +370,9 @@ export function AfterSessionProvider({ children }: { children: ReactNode }) {
       value={{
         afterSession,
         setAfterSession,
+        lastTotalMinutes,
+        setLastTotalMinutes,
+        settingsReady,
         musicPlayback,
         setMusicPlayback,
         musicRepeat,
