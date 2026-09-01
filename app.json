@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.anonymous.smart-session-timer",
+      "bundleIdentifier": "com.macshinkyu.smartsessiontimer",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
