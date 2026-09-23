@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "smart-session-timer",
+    "name": "Session Timer",
     "slug": "smart-session-timer",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "smartsessiontimer",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/images/app-icon.png",
       "bundleIdentifier": "com.macshinkyu.smartsessiontimer",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
