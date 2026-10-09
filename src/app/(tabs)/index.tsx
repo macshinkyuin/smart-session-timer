@@ -2,20 +2,20 @@ import {
   setAudioModeAsync,
   useAudioPlayer,
   useAudioPlayerStatus,
-} from 'expo-audio';
-import * as DocumentPicker from 'expo-document-picker';
-import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+} from "expo-audio";
+import * as DocumentPicker from "expo-document-picker";
+import { router } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { KeepAwakeGuard } from '@/components/keep-awake-guard';
-import { useAfterSession, type SessionPreset } from '@/hooks/use-after-session';
-import { triggerSessionEndAlert } from '@/lib/session-end-alert';
+import { KeepAwakeGuard } from "@/components/keep-awake-guard";
+import { useAfterSession, type SessionPreset } from "@/hooks/use-after-session";
+import { triggerSessionEndAlert } from "@/lib/session-end-alert";
 
 const HOLD_DELAY_MS = 350;
 const HOLD_INTERVAL_MS = 250;
-const SESSION_END_BEEP = require('@/assets/sounds/session-end-beep.wav');
+const SESSION_END_BEEP = require("@/assets/sounds/session-end-beep.wav");
 const BEEP_STATUS_POLL_MS = 50;
 const BEEP_FAILSAFE_TIMEOUT_MS = 2500;
 
@@ -24,9 +24,15 @@ type PlaylistTrack = {
   name: string;
 };
 
+function formatDuration(seconds: number, overtime = false): string {
+  const minutes = Math.floor(seconds / 60);
+  const parts = [minutes, seconds % 60];
+  return `${overtime ? "+" : ""}${parts.map((part) => String(part).padStart(2, "0")).join(":")}`;
+}
+
 function waitForBeepCondition(
   predicate: () => boolean,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<boolean> {
   return new Promise((resolve) => {
     if (predicate()) {
@@ -64,16 +70,20 @@ export default function HomeScreen() {
     seasonalBackground,
     sessionPresets,
   } = useAfterSession();
-  const [currentTime, setCurrentTime] = useState('');
+  const [currentTime, setCurrentTime] = useState("");
   const [totalMinutes, setTotalMinutes] = useState(60);
   const [presetVisible, setPresetVisible] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(60 * 60);
   const [overtimeSeconds, setOvertimeSeconds] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const isOvertime =
+    whenTimeReachesZero === "overtime" && remainingSeconds === 0;
   const [isRunning, setIsRunning] = useState(false);
   const [playlist, setPlaylist] = useState<PlaylistTrack[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
   const [controlsLocked, setControlsLocked] = useState(false);
   const holdIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const totalMinutesRef = useRef(totalMinutes);
   const remainingSecondsRef = useRef(remainingSeconds);
   const overtimeSecondsRef = useRef(overtimeSeconds);
   const endAlertFiredRef = useRef(false);
@@ -89,7 +99,9 @@ export default function HomeScreen() {
   overtimeSecondsRef.current = overtimeSeconds;
   sessionEndAlertRef.current = sessionEndAlert;
   const currentTrack = playlist[currentTrackIndex] ?? null;
-  const player = useAudioPlayer(currentTrack ? { uri: currentTrack.uri } : null);
+  const player = useAudioPlayer(
+    currentTrack ? { uri: currentTrack.uri } : null,
+  );
   const playbackStatus = useAudioPlayerStatus(player);
   const beepPlayer = useAudioPlayer(SESSION_END_BEEP, {
     updateInterval: 100,
@@ -104,7 +116,7 @@ export default function HomeScreen() {
   }, [beepPlayer]);
 
   useEffect(() => {
-    player.loop = musicRepeat === 'repeatOne';
+    player.loop = musicRepeat === "repeatOne";
   }, [player, musicRepeat]);
 
   const playSessionEndBeep = async (options?: {
@@ -117,15 +129,12 @@ export default function HomeScreen() {
 
       const didStart = await waitForBeepCondition(
         () => beepStatusRef.current.playing,
-        BEEP_FAILSAFE_TIMEOUT_MS
+        BEEP_FAILSAFE_TIMEOUT_MS,
       );
 
       if (!didStart) {
         beepPlayer.play();
-        await waitForBeepCondition(
-          () => beepStatusRef.current.playing,
-          500
-        );
+        await waitForBeepCondition(() => beepStatusRef.current.playing, 500);
       }
 
       await waitForBeepCondition(
@@ -133,7 +142,7 @@ export default function HomeScreen() {
           beepStatusRef.current.didJustFinish ||
           (!beepStatusRef.current.playing &&
             beepStatusRef.current.currentTime > 0.05),
-        BEEP_FAILSAFE_TIMEOUT_MS
+        BEEP_FAILSAFE_TIMEOUT_MS,
       );
     } finally {
       if (options?.shouldResumeMusic) {
@@ -151,6 +160,8 @@ export default function HomeScreen() {
 
   const applySessionPreset = (preset: SessionPreset) => {
     const minutes = Math.max(1, preset.minutes);
+    setElapsedSeconds(0);
+    totalMinutesRef.current = minutes;
     setTotalMinutes(minutes);
     setRemainingSeconds(minutes * 60);
     remainingSecondsRef.current = minutes * 60;
@@ -159,18 +170,18 @@ export default function HomeScreen() {
     setIsRunning(false);
     setPresetVisible(false);
 
-    if (afterSession === 'keep') {
+    if (afterSession === "keep") {
       setLastTotalMinutes(minutes);
     }
 
-    if (musicPlayback === 'sync' && currentTrack) {
+    if (musicPlayback === "sync" && currentTrack) {
       player.pause();
     }
   };
 
   const pickMusic = async () => {
     const result = await DocumentPicker.getDocumentAsync({
-      type: 'audio/*',
+      type: "audio/*",
       copyToCacheDirectory: true,
       multiple: true,
     });
@@ -181,7 +192,7 @@ export default function HomeScreen() {
 
     const tracks = result.assets.map((asset) => ({
       uri: asset.uri,
-      name: asset.name || 'Audio',
+      name: asset.name || "Audio",
     }));
     autoPlayAfterTrackChangeRef.current = false;
     sawTrackFinishRef.current = false;
@@ -225,7 +236,7 @@ export default function HomeScreen() {
     const nextRunning = !isRunning;
     setIsRunning(nextRunning);
 
-    if (musicPlayback === 'sync' && currentTrack) {
+    if (musicPlayback === "sync" && currentTrack) {
       if (nextRunning) {
         playMusicFromCurrentPosition();
       } else {
@@ -239,7 +250,10 @@ export default function HomeScreen() {
       playsInSilentMode: true,
       allowsRecording: false,
       shouldRouteThroughEarpiece: false,
-      interruptionMode: 'mixWithOthers',
+      shouldPlayInBackground: true,
+      interruptionMode: "mixWithOthers",
+    }).catch((error) => {
+      console.error("Audio mode configuration failed:", error);
     });
   }, []);
 
@@ -253,9 +267,11 @@ export default function HomeScreen() {
     if (!settingsReady || hasAppliedLaunchDurationRef.current) return;
     hasAppliedLaunchDurationRef.current = true;
 
-    if (afterSession !== 'keep') return;
+    if (afterSession !== "keep") return;
 
     const minutes = Math.max(1, lastTotalMinutes);
+    setElapsedSeconds(0);
+    totalMinutesRef.current = minutes;
     setTotalMinutes(minutes);
     setRemainingSeconds(minutes * 60);
     remainingSecondsRef.current = minutes * 60;
@@ -274,7 +290,7 @@ export default function HomeScreen() {
     sawTrackFinishRef.current = true;
 
     if (playlistAdvanceLockedRef.current) return;
-    if (musicRepeat === 'repeatOne') return;
+    if (musicRepeat === "repeatOne") return;
     if (playlist.length <= 1) return;
     if (currentTrackIndex >= playlist.length - 1) return;
 
@@ -295,49 +311,44 @@ export default function HomeScreen() {
     autoPlayAfterTrackChangeRef.current = false;
     sawTrackFinishRef.current = false;
     player.play();
-  }, [
-    currentTrackIndex,
-    currentTrack,
-    playbackStatus.isLoaded,
-    player,
-  ]);
+  }, [currentTrackIndex, currentTrack, playbackStatus.isLoaded, player]);
 
   const adjustTime = (deltaMinutes: number) => {
     if (controlsLocked) return;
 
-    setTotalMinutes((prevTotal) => {
-      const newTotal = Math.max(1, prevTotal + deltaMinutes);
-      const actualDelta = newTotal - prevTotal;
+    const prevTotal = totalMinutesRef.current;
+    const newTotal = Math.max(1, prevTotal + deltaMinutes);
+    const actualDelta = newTotal - prevTotal;
+    if (actualDelta === 0) return;
 
-      if (actualDelta !== 0) {
-        const currentBalance =
-          remainingSecondsRef.current - overtimeSecondsRef.current;
-        const newBalance = currentBalance + actualDelta * 60;
+    const currentBalance =
+      remainingSecondsRef.current - overtimeSecondsRef.current;
+    const newBalance = currentBalance + actualDelta * 60;
 
-        if (newBalance > 0) {
-          remainingSecondsRef.current = newBalance;
-          overtimeSecondsRef.current = 0;
-          setRemainingSeconds(newBalance);
-          setOvertimeSeconds(0);
-        } else if (newBalance === 0) {
-          remainingSecondsRef.current = 0;
-          overtimeSecondsRef.current = 0;
-          setRemainingSeconds(0);
-          setOvertimeSeconds(0);
-        } else {
-          remainingSecondsRef.current = 0;
-          overtimeSecondsRef.current = Math.abs(newBalance);
-          setRemainingSeconds(0);
-          setOvertimeSeconds(Math.abs(newBalance));
-        }
+    // Update immediately so repeated long-press callbacks use the latest total.
+    totalMinutesRef.current = newTotal;
+    setTotalMinutes(newTotal);
 
-        if (afterSession === 'keep') {
-          setLastTotalMinutes(newTotal);
-        }
-      }
+    if (newBalance > 0) {
+      remainingSecondsRef.current = newBalance;
+      overtimeSecondsRef.current = 0;
+      setRemainingSeconds(newBalance);
+      setOvertimeSeconds(0);
+    } else if (newBalance === 0) {
+      remainingSecondsRef.current = 0;
+      overtimeSecondsRef.current = 0;
+      setRemainingSeconds(0);
+      setOvertimeSeconds(0);
+    } else {
+      remainingSecondsRef.current = 0;
+      overtimeSecondsRef.current = Math.abs(newBalance);
+      setRemainingSeconds(0);
+      setOvertimeSeconds(Math.abs(newBalance));
+    }
 
-      return newTotal;
-    });
+    if (afterSession === "keep") {
+      setLastTotalMinutes(newTotal);
+    }
   };
 
   const clearHoldTimers = () => {
@@ -374,10 +385,10 @@ export default function HomeScreen() {
 
       setCurrentTime(
         now.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        })
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
       );
     };
 
@@ -392,70 +403,70 @@ export default function HomeScreen() {
     if (!isRunning) return;
 
     const timer = setInterval(() => {
-      setRemainingSeconds((prev) => {
-        if (prev > 1) {
-          return prev - 1;
-        }
+      const remaining = remainingSecondsRef.current;
+      if (remaining === 0 && whenTimeReachesZero === "stop") {
+        setIsRunning(false);
+        overtimeSecondsRef.current = 0;
+        setOvertimeSeconds(0);
+        if (musicPlayback === "sync" && currentTrack) player.pause();
+        return;
+      }
 
-        if (prev === 1) {
-          if (!endAlertFiredRef.current) {
-            endAlertFiredRef.current = true;
+      // One elapsed update per valid tick; pause and duration edits do not change it.
+      setElapsedSeconds((elapsed) => elapsed + 1);
+      if (remaining > 0) {
+        remainingSecondsRef.current = remaining - 1;
+        setRemainingSeconds(remaining - 1);
+      } else {
+        overtimeSecondsRef.current += 1;
+        setOvertimeSeconds(overtimeSecondsRef.current);
+      }
 
-            const musicWasPlaying = Boolean(currentTrack) && player.playing;
-            if (musicWasPlaying) {
-              // Pause immediately so the full double-beep is audible.
-              // Lock playlist advance so track-end cannot race the beep.
-              playlistAdvanceLockedRef.current = true;
-              player.pause();
-            }
+      if (remaining === 1) {
+        if (!endAlertFiredRef.current) {
+          endAlertFiredRef.current = true;
 
-            const shouldResumeMusic =
-              musicWasPlaying &&
-              (musicPlayback === 'manual' ||
-                (musicPlayback === 'sync' &&
-                  whenTimeReachesZero === 'overtime'));
-
-            void triggerSessionEndAlert(sessionEndAlertRef.current, () =>
-              playSessionEndBeepRef.current({ shouldResumeMusic })
-            ).finally(() => {
-              // Clear advance lock even when sound/beep is not used.
-              playlistAdvanceLockedRef.current = false;
-            });
-          }
-
-          if (whenTimeReachesZero === 'stop') {
-            setIsRunning(false);
-            setOvertimeSeconds(0);
-            if (musicPlayback === 'sync' && currentTrack) {
-              player.pause();
-            }
-          }
-          return 0;
-        }
-
-        if (whenTimeReachesZero === 'stop') {
-          setIsRunning(false);
-          setOvertimeSeconds(0);
-          if (musicPlayback === 'sync' && currentTrack) {
+          const musicWasPlaying = Boolean(currentTrack) && player.playing;
+          const shouldPlayEndSound =
+            sessionEndAlertRef.current === "sound" ||
+            sessionEndAlertRef.current === "soundAndVibration";
+          if (musicWasPlaying && shouldPlayEndSound) {
+            // Pause immediately so the full double-beep is audible.
+            // Lock playlist advance so track-end cannot race the beep.
+            playlistAdvanceLockedRef.current = true;
             player.pause();
           }
-          return 0;
+
+          const shouldResumeMusic =
+            musicWasPlaying &&
+            (musicPlayback === "manual" ||
+              (musicPlayback === "sync" && whenTimeReachesZero === "overtime"));
+
+          void triggerSessionEndAlert(sessionEndAlertRef.current, () =>
+            playSessionEndBeepRef.current({ shouldResumeMusic }),
+          ).finally(() => {
+            // Clear advance lock even when sound/beep is not used.
+            playlistAdvanceLockedRef.current = false;
+          });
         }
 
-        setOvertimeSeconds((overtime) => overtime + 1);
-        return 0;
-      });
+        if (whenTimeReachesZero === "stop") {
+          setIsRunning(false);
+          overtimeSecondsRef.current = 0;
+          setOvertimeSeconds(0);
+          if (musicPlayback === "sync" && currentTrack) player.pause();
+        }
+      }
     }, 1000);
 
     return () => clearInterval(timer);
   }, [isRunning, whenTimeReachesZero, musicPlayback, currentTrack, player]);
 
-
   return (
     <SafeAreaView
       style={[styles.safeArea, { backgroundColor: seasonalBackground }]}
     >
-      {keepScreenAwake === 'on' && isRunning ? <KeepAwakeGuard /> : null}
+      {keepScreenAwake === "on" && isRunning ? <KeepAwakeGuard /> : null}
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.container}
@@ -468,12 +479,12 @@ export default function HomeScreen() {
             onPress={toggleControlsLock}
             hitSlop={8}
           >
-            <Text style={styles.lockIcon}>{controlsLocked ? '🔒' : '🔓'}</Text>
+            <Text style={styles.lockIcon}>{controlsLocked ? "🔒" : "🔓"}</Text>
           </Pressable>
           <Text style={styles.title}>SMART SESSION TIMER</Text>
           <Pressable
             style={styles.settingsButton}
-            onPress={() => router.push('/settings')}
+            onPress={() => router.push("/settings")}
           >
             <Text style={styles.settingsIcon}>⚙️</Text>
           </Pressable>
@@ -496,7 +507,7 @@ export default function HomeScreen() {
                 controlsLocked && styles.controlDisabledText,
               ]}
             >
-              {totalMinutes}:00
+              {formatDuration(totalMinutes * 60)}
             </Text>
           </Pressable>
 
@@ -605,29 +616,46 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.timeRow}>
-          <View style={styles.timeBox}>
-            <Text style={styles.label}>REMAINING</Text>
-            <Text style={styles.timeValue}>
-              {Math.floor(remainingSeconds / 60)}:
-              {String(remainingSeconds % 60).padStart(2, '0')}
+          <View
+            style={[styles.timeBox, isOvertime && styles.elapsedOvertimeBox]}
+          >
+            <Text
+              style={[styles.label, isOvertime && styles.elapsedOvertimeText]}
+            >
+              ELAPSED
+            </Text>
+            <Text
+              style={[
+                styles.timeValue,
+                isOvertime && styles.elapsedOvertimeText,
+              ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {formatDuration(elapsedSeconds)}
             </Text>
           </View>
 
-          <View style={styles.timeBox}>
-            <Text style={styles.label}>OVERTIME</Text>
-            <Text style={styles.timeValue}>
-              {Math.floor(overtimeSeconds / 60)}:
-              {String(overtimeSeconds % 60).padStart(2, '0')}
-          </Text>
+          <View style={[styles.timeBox, isOvertime && styles.overtimeBox]}>
+            <Text style={[styles.label, isOvertime && styles.overtimeText]}>
+              {isOvertime ? "OVERTIME" : "REMAINING"}
+            </Text>
+            <Text
+              style={[styles.timeValue, isOvertime && styles.overtimeText]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {formatDuration(
+                isOvertime ? overtimeSeconds : remainingSeconds,
+                isOvertime,
+              )}
+            </Text>
           </View>
         </View>
 
-        <Pressable
-          style={styles.startButton}
-          onPress={toggleTimerRunning}
-        >
+        <Pressable style={styles.startButton} onPress={toggleTimerRunning}>
           <Text style={styles.startText}>
-            {isRunning ? '⏸ PAUSE' : '▶ START'}
+            {isRunning ? "⏸ PAUSE" : "▶ START"}
           </Text>
         </Pressable>
         <Pressable
@@ -637,13 +665,18 @@ export default function HomeScreen() {
             if (controlsLocked) return;
             setIsRunning(false);
             setOvertimeSeconds(0);
+            overtimeSecondsRef.current = 0;
+            setElapsedSeconds(0);
             stopMusic();
 
-            if (afterSession === 'reset') {
+            if (afterSession === "reset") {
+              totalMinutesRef.current = 60;
               setTotalMinutes(60);
               setRemainingSeconds(60 * 60);
+              remainingSecondsRef.current = 60 * 60;
             } else {
               setRemainingSeconds(totalMinutes * 60);
+              remainingSecondsRef.current = totalMinutes * 60;
             }
           }}
         >
@@ -663,10 +696,10 @@ export default function HomeScreen() {
               <Text style={styles.musicIcon}>♫</Text>
               <View style={styles.musicTextBlock}>
                 <Text style={styles.audioText} numberOfLines={1}>
-                  {currentTrack?.name ?? 'No Music Selected'}
+                  {currentTrack?.name ?? "No Music Selected"}
                   {playlist.length > 1
                     ? `  ${currentTrackIndex + 1} / ${playlist.length}`
-                    : ''}
+                    : ""}
                 </Text>
                 {!currentTrack ? (
                   <Text style={styles.musicHint}>
@@ -682,14 +715,14 @@ export default function HomeScreen() {
                 style={styles.musicPlayButton}
               >
                 <Text style={styles.audioText}>
-                  {playbackStatus.playing ? '⏸' : '▶'}
+                  {playbackStatus.playing ? "⏸" : "▶"}
                 </Text>
               </Pressable>
             ) : null}
           </View>
         </View>
       </ScrollView>
-     </SafeAreaView>
+    </SafeAreaView>
   );
 }
 
@@ -703,7 +736,7 @@ const styles = StyleSheet.create({
   },
 
   container: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingHorizontal: 24,
     paddingTop: 20,
     paddingBottom: 48,
@@ -712,37 +745,37 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1.5,
-    textAlign: 'center',
+    textAlign: "center",
   },
 
   clock: {
     fontSize: 38,
-    fontWeight: '300',
+    fontWeight: "300",
     marginBottom: 34,
   },
 
   section: {
-    width: '100%',
-    alignItems: 'center',
+    width: "100%",
+    alignItems: "center",
   },
 
   label: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     letterSpacing: 1.2,
     marginBottom: 5,
   },
 
   totalTime: {
     fontSize: 64,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
 
   adjustRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 30,
     marginTop: 15,
     marginBottom: 6,
@@ -753,19 +786,19 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#BBBBBB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    borderColor: "#BBBBBB",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
   },
 
   adjustText: {
     fontSize: 36,
-    fontWeight: '400',
+    fontWeight: "400",
   },
 
   quickAddRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 30,
     marginBottom: 28,
   },
@@ -775,92 +808,111 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#BBBBBB',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "#BBBBBB",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   quickAddText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
 
   timeRow: {
-    width: '100%',
-    flexDirection: 'row',
+    width: "100%",
+    flexDirection: "row",
     gap: 14,
   },
 
   timeBox: {
     flex: 1,
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    minWidth: 0,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
     paddingVertical: 20,
     borderRadius: 16,
   },
 
+  elapsedOvertimeBox: {
+    backgroundColor: "#EAF2FF",
+  },
+
+  elapsedOvertimeText: {
+    color: "#2563EB",
+  },
+
+  overtimeBox: {
+    backgroundColor: "#FFF1E8",
+  },
+
+  overtimeText: {
+    color: "#C65D32",
+  },
+
   timeValue: {
+    maxWidth: "100%",
     fontSize: 34,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
 
   startButton: {
-    width: '100%',
+    width: "100%",
     marginTop: 30,
     paddingVertical: 18,
     borderRadius: 18,
-    backgroundColor: '#222222',
-    alignItems: 'center',
+    backgroundColor: "#222222",
+    alignItems: "center",
   },
 
   startText: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1,
   },
 
   endButton: {
-    width: '100%',
+    width: "100%",
     marginTop: 12,
     paddingVertical: 16,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#BBBBBB',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
+    borderColor: "#BBBBBB",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
   },
-  
+
   endText: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.8,
   },
 
   audioArea: {
-    width: '100%',
+    width: "100%",
     marginTop: 18,
   },
 
   musicCard: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    backgroundColor: '#FFFFFF',
+    borderColor: "#E0E0E0",
+    backgroundColor: "#FFFFFF",
   },
 
   musicSelect: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     minWidth: 0,
   },
@@ -886,47 +938,47 @@ const styles = StyleSheet.create({
 
   musicHint: {
     fontSize: 13,
-    color: '#888888',
+    color: "#888888",
   },
 
   presetInline: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
     gap: 10,
     marginTop: 12,
     marginBottom: 8,
   },
-  
+
   presetInlineButton: {
     minWidth: 58,
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#CCCCCC',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
+    borderColor: "#CCCCCC",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
   },
-  
+
   presetInlineText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   headerRow: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 18,
   },
 
   settingsButton: {
     width: 44,
     height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  
+
   settingsIcon: {
     fontSize: 28,
   },
@@ -934,8 +986,8 @@ const styles = StyleSheet.create({
   lockButton: {
     width: 44,
     height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   lockIcon: {
